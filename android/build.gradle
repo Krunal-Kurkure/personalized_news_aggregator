@@ -1,0 +1,80 @@
+// Project-level build.gradle (replace the existing file with this content)
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // A safe AGP version compatible with many Flutter/Plugin setups
+        classpath 'com.android.tools.build:gradle:7.4.2'
+        // If your project uses Kotlin Gradle plugin, you can add:
+        // classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10"
+    }
+}
+
+// Keep repositories for plugins
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// Preserve custom build dir layout
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+// ----------------------
+// Robust fallback: apply namespace to any Android library module missing it
+// Use gradle.projectsEvaluated so we don't call afterEvaluate on already-evaluated projects.
+gradle.projectsEvaluated {
+    rootProject.subprojects.each { subproject ->
+        try {
+            // Get android extension safely
+            def androidExt = subproject.extensions.findByName('android')
+            if (androidExt != null) {
+                // Only act if this module is an Android library (has library plugin)
+                // We test for library plugin by checking plugin ids
+                def isLibrary = subproject.plugins.hasPlugin('com.android.library') || (subproject.plugins.hasPlugin('com.android.application') == false && androidExt.getClass().getSimpleName().toLowerCase().contains('library'))
+                if (isLibrary) {
+                    def hasNamespace = false
+                    try {
+                        // Some plugin versions expose 'namespace' property directly on the extension
+                        hasNamespace = androidExt.hasProperty('namespace') && androidExt.namespace != null && androidExt.namespace.toString().trim().length() > 0
+                    } catch (e) {
+                        // ignore
+                    }
+                    if (!hasNamespace) {
+                        def modName = subproject.name.replaceAll('[^A-Za-z0-9_]','_')
+                        // Set the namespace property on the android extension
+                        try {
+                            androidExt.namespace = "com.example.plugin.${modName}"
+                            println("Applied fallback namespace to ${subproject.name}: com.example.plugin.${modName}")
+                        } catch (e2) {
+                            // If direct assignment fails, try via reflection (best-effort)
+                            try {
+                                subproject.android.namespace = "com.example.plugin.${modName}"
+                                println("Applied fallback namespace (via android) to ${subproject.name}: com.example.plugin.${modName}")
+                            } catch (ignored) {
+                                println("Could not apply fallback namespace to ${subproject.name}: ${ignored}")
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (ignored) {
+            // ignore modules we can't introspect
+        }
+    }
+}
+
+// Keep the clean task
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
